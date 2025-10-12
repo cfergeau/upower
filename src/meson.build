@@ -25,6 +25,8 @@ subdir('freebsd')
 # Everything that is also needed by the tests
 upowerd_private = static_library('upowerd-private',
     sources: [
+        'up-bt-gatt.h',
+        'up-bt-gatt.c',
         'up-constants.h',
         'up-config.h',
         'up-config.c',
