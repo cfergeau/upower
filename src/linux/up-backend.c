@@ -37,6 +37,8 @@
 
 #include "up-enumerator-udev.h"
 
+#include "up-bt-gatt.h"
+
 #include "up-device-supply.h"
 #include "up-device-wup.h"
 #include "up-device-hid.h"
@@ -231,12 +233,191 @@ is_interesting_iface_proxy (GDBusProxy *interface_proxy)
 		g_str_equal (iface, "org.bluez.Device1");
 }
 
+static void gatt_debug(GDBusObject *object);
+static void dump_properties(GDBusProxy *proxy);
+
+static void
+gatt_characteristic_debug(GDBusObject *object)
+{
+	GDBusObjectProxy *object_proxy;
+	GDBusProxy *proxy;
+	GError *error=NULL;
+	const char *uuid;
+	const char *service;
+	GDBusInterface *iface;
+	GDBusObjectProxy *service_proxy;
+
+	g_debug("%s - %s", G_STRFUNC,  g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+	iface = g_dbus_object_get_interface (object, "org.bluez.GattCharacteristic1");
+	if (iface == NULL) {
+		g_debug("%s - no GATT characteristic interface for %s", G_STRFUNC, g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+		return;
+	}
+	//object_proxy = G_DBUS_OBJECT_PROXY (up_device_get_native (device));
+	object_proxy = G_DBUS_OBJECT_PROXY (object);
+	/* Initial battery values */
+	proxy = g_dbus_proxy_new_sync (g_dbus_object_proxy_get_connection (object_proxy),
+				       G_DBUS_PROXY_FLAGS_NONE,
+				       NULL,
+				       "org.bluez",
+				       g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)),
+				       "org.bluez.GattCharacteristic1",
+				       NULL,
+				       &error);
+
+	if (!proxy) {
+		g_warning ("Failed to get proxy for %s",
+			   g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)));
+		return;
+	}
+
+	dump_properties(proxy);
+
+	uuid = g_variant_get_string (g_dbus_proxy_get_cached_property(proxy, "UUID"), NULL);
+	g_warning("%s - %s - %s", G_STRFUNC, uuid, gatt_attribute_description(uuid));
+	service = g_variant_get_string (g_dbus_proxy_get_cached_property(proxy, "Service"), NULL);
+	g_warning("%s - %s", G_STRFUNC, service);
+	service_proxy = g_dbus_object_proxy_new(g_dbus_object_proxy_get_connection(object_proxy), service);
+	gatt_debug(G_DBUS_OBJECT(service_proxy));
+	//percentage = g_variant_get_byte (g_dbus_proxy_get_cached_property (proxy, "Percentage"));
+}
+
+static void dump_uuids(GDBusObject *object)
+{
+	GDBusObjectProxy *object_proxy;
+	GDBusProxy *proxy;
+	GError *error=NULL;
+	GDBusInterface *iface;
+
+	g_debug("%s - %s", G_STRFUNC,  g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+	iface = g_dbus_object_get_interface (object, "org.bluez.Device1");
+	if (iface == NULL) {
+		g_debug("%s - no GATT characteristic interface for %s", G_STRFUNC, g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+		return;
+	}
+	//object_proxy = G_DBUS_OBJECT_PROXY (up_device_get_native (device));
+	object_proxy = G_DBUS_OBJECT_PROXY (object);
+	/* Initial battery values */
+	proxy = g_dbus_proxy_new_sync (g_dbus_object_proxy_get_connection (object_proxy),
+				       G_DBUS_PROXY_FLAGS_NONE,
+				       NULL,
+				       "org.bluez",
+				       g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)),
+				       "org.bluez.Device1",
+				       NULL,
+				       &error);
+
+	if (!proxy) {
+		g_warning ("Failed to get proxy for %s",
+			   g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)));
+		return;
+	}
+
+	const char **uuids = g_variant_get_strv (g_dbus_proxy_get_cached_property(proxy, "UUIDs"), NULL);
+	for (const char **uuid = uuids; *uuid != NULL; uuid++) {
+		g_warning("%s - %s - %s", G_STRFUNC, *uuid, gatt_attribute_description(*uuid));
+	}
+}
+
+static void dump_properties(GDBusProxy *proxy)
+{
+	char **properties;
+	properties = g_dbus_proxy_get_cached_property_names (proxy);
+	if (properties == NULL) {
+		g_warning ("no cached properties");
+		return;
+	} else {
+		int i = 0;
+		while (properties[i] != NULL) {
+			g_warning ("%d: %s", i, properties[i]);
+			i++;
+		}
+		g_strfreev(properties);
+	}
+}
+
+static void dump_interfaces(GDBusObject *object)
+{
+	GList *interfaces;
+	GList *it;
+	g_debug("%s - %s", G_STRFUNC, g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+	interfaces = g_dbus_object_get_interfaces(object);
+	for (it = interfaces; it != NULL; it = it -> next) {
+		GDBusInterface *interface = G_DBUS_INTERFACE(it->data);
+		g_debug("interface: %p", interface);
+		GDBusInterfaceInfo *info = g_dbus_interface_get_info(interface);
+		g_debug("info: %p", info);
+		if (info != NULL) {
+			g_debug("\tinterface: %s", info->name);
+		}
+		GDBusProxy *proxy = G_DBUS_PROXY(interface);
+		info = g_dbus_proxy_get_interface_info(proxy);
+		g_debug("proxy info: %p", info);
+		if (info != NULL) {
+			g_debug("\tinterface: %s", info->name);
+		}
+	}
+	g_debug("finished dumping interfaces for %s", g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+}
+
+static void
+gatt_debug(GDBusObject *object)
+{
+	GDBusObjectProxy *object_proxy;
+	GDBusProxy *proxy;
+	GError *error=NULL;
+	const char *uuid;
+	GDBusInterface *iface;
+
+	g_debug("%s - %s", G_STRFUNC,  g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+	iface = g_dbus_object_get_interface (object, "org.bluez.GattService1");
+	if (iface == NULL) {
+		g_debug("%s - no GATT service for %s", G_STRFUNC, g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+		dump_interfaces(object);
+		return;
+	}
+	//object_proxy = G_DBUS_OBJECT_PROXY (up_device_get_native (device));
+	object_proxy = G_DBUS_OBJECT_PROXY (object);
+	/* Initial battery values */
+	proxy = g_dbus_proxy_new_sync (g_dbus_object_proxy_get_connection (object_proxy),
+				       G_DBUS_PROXY_FLAGS_NONE,
+				       NULL,
+				       "org.bluez",
+				       g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)),
+				       "org.bluez.GattService1",
+				       NULL,
+				       &error);
+
+	if (!proxy) {
+		g_warning ("Failed to get proxy for %s",
+			   g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)));
+		return;
+	}
+
+	dump_properties(proxy);
+
+	uuid = g_variant_get_string (g_dbus_proxy_get_cached_property(proxy, "UUID"), NULL);
+	g_warning("%s - %s - %s", G_STRFUNC, uuid, gatt_attribute_description(uuid));
+	//percentage = g_variant_get_byte (g_dbus_proxy_get_cached_property (proxy, "Percentage"));
+}
+
 static gboolean
 has_battery_iface (GDBusObject *object)
 {
 	GDBusInterface *iface;
 
+	gatt_debug(object);
 	iface = g_dbus_object_get_interface (object, "org.bluez.Battery1");
+	// iface = g_dbus_object_get_interface (object, "org.bluez.Gatt1");
+	g_debug ("%s: %s - %d", G_STRFUNC, g_dbus_object_get_object_path (object), iface != NULL);
+	if g_str_equal("/org/bluez/hci0/dev_FB_EC_57_5A_DB_B3/service0015/char0016", g_dbus_object_get_object_path (object)) {
+		gatt_debug(object);
+		g_warning("battery level right side!");
+	}
+	if g_str_equal("/org/bluez/hci0/dev_FB_EC_57_5A_DB_B3/service0010/char0011", g_dbus_object_get_object_path (object)) {
+		gatt_debug(object);
+		g_warning("battery level left side!");
+	}
 	if (!iface)
 		return FALSE;
 	g_object_unref (iface);
@@ -255,6 +436,7 @@ bluez_proxies_changed (GDBusObjectManagerClient *manager,
 	GObject *object;
 	UpDeviceBluez *bluez;
 
+	g_warning("%s", G_STRFUNC);
 	if (!is_interesting_iface_proxy (interface_proxy))
 		return;
 
@@ -276,6 +458,7 @@ bluez_interface_removed (GDBusObjectManager *manager,
 	UpBackend *backend = user_data;
 	GObject *object;
 
+	g_debug("%s", G_STRFUNC);
 	/* It might be another iface on another device that got removed */
 	if (has_battery_iface (bus_object))
 		return;
@@ -301,8 +484,10 @@ bluez_interface_added (GDBusObjectManager *manager,
 	UpBackend *backend = user_data;
 	GObject *object;
 
+	g_debug ("%s: %s", G_STRFUNC, g_dbus_object_get_object_path (bus_object));
 	if (!has_battery_iface (bus_object))
 		return;
+
 
 	object = up_device_list_lookup (backend->priv->device_list, G_OBJECT (bus_object));
 	if (object != NULL) {
@@ -315,7 +500,7 @@ bluez_interface_added (GDBusObjectManager *manager,
 	                         "native", G_OBJECT (bus_object),
 	                         NULL);
 	if (device) {
-		g_debug ("emitting device-added: %s", g_dbus_object_get_object_path (bus_object));
+		g_warning ("emitting device-added: %s", g_dbus_object_get_object_path (bus_object));
 		if (update_added_duplicate_device (backend, device))
 			g_signal_emit (backend, signals[SIGNAL_DEVICE_ADDED], 0, device);
 	}
