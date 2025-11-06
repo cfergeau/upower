@@ -410,6 +410,7 @@ static GDBusProxy *bluez_new_device_proxy(GDBusObject *object, GError **error)
 	GDBusObjectProxy *object_proxy;
 
 	object_proxy = G_DBUS_OBJECT_PROXY (object);
+	g_warning("%s: %s %s", G_STRFUNC, g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)), g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
 	return g_dbus_proxy_new_sync (g_dbus_object_proxy_get_connection (object_proxy),
 				       G_DBUS_PROXY_FLAGS_NONE,
 				       NULL,
@@ -536,6 +537,7 @@ static gboolean bluez_device_has_battery_service(GDBusProxy *proxy)
 {
 	g_autoptr(GVariant) prop_variant = NULL;
 	const char **uuids;
+	g_warning("%s", G_STRFUNC);
 	prop_variant = g_dbus_proxy_get_cached_property(proxy, "UUIDs");
 	uuids = g_variant_get_strv (g_dbus_proxy_get_cached_property(proxy, "UUIDs"), NULL);
 	for (const char **uuid = uuids; *uuid != NULL; uuid++) {
@@ -558,7 +560,11 @@ has_battery_iface (GDBusObject *object)
 	// iface = g_dbus_object_get_interface (object, "org.bluez.Gatt1");
 	g_debug ("%s: %s - %d", G_STRFUNC, g_dbus_object_get_object_path (object), iface != NULL);
 	g_autoptr(GDBusProxy) device_proxy = NULL;
-	device_proxy = bluez_new_device_proxy(object, NULL);
+	GError *error = NULL;
+	device_proxy = bluez_new_device_proxy(object, &error);
+	g_warning("%s: device_proxy: %p for %s %p", G_STRFUNC, device_proxy, g_dbus_object_get_object_path (object), error);
+	g_warning("iface name: %s", g_dbus_proxy_get_interface_name(device_proxy));
+	//dump_interfaces(object);
 	if ((device_proxy != NULL) && (bluez_device_has_battery_service(device_proxy))) {
 		g_warning("%s: device %s has battery UUID", G_STRFUNC, g_dbus_object_get_object_path (object));
 	} else {
