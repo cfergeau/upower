@@ -73,6 +73,8 @@ struct UpBackendPrivate
 	/* BlueZ */
 	guint			 bluez_watch_id;
 	GDBusObjectManager	*bluez_client;
+	GHashTable		*gatt_devices;
+	GHashTable		*gatt_battery_services;
 };
 
 enum {
@@ -408,6 +410,12 @@ gatt_debug(GDBusObject *object)
 static GDBusProxy *bluez_new_device_proxy(GDBusObject *object, GError **error)
 {
 	GDBusObjectProxy *object_proxy;
+	g_autoptr(GDBusInterface) iface;
+
+	iface = g_dbus_object_get_interface (object, "org.bluez.Device1");
+	if (iface == NULL) {
+		return NULL;
+	}
 
 	object_proxy = G_DBUS_OBJECT_PROXY (object);
 	g_warning("%s: %s %s", G_STRFUNC, g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)), g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
@@ -424,6 +432,12 @@ static GDBusProxy *bluez_new_device_proxy(GDBusObject *object, GError **error)
 static GDBusProxy *bluez_new_service_proxy(GDBusObject *object, GError **error)
 {
 	GDBusObjectProxy *object_proxy;
+	g_autoptr(GDBusInterface) iface = NULL;
+
+	iface = g_dbus_object_get_interface (object, "org.bluez.GattService1");
+	if (iface == NULL) {
+		return NULL;
+	}
 
 	object_proxy = G_DBUS_OBJECT_PROXY (object);
 	return g_dbus_proxy_new_sync (g_dbus_object_proxy_get_connection (object_proxy),
@@ -439,6 +453,12 @@ static GDBusProxy *bluez_new_service_proxy(GDBusObject *object, GError **error)
 static GDBusProxy *bluez_new_characteristic_proxy(GDBusObject *object, GError **error)
 {
 	GDBusObjectProxy *object_proxy;
+	g_autoptr(GDBusInterface) iface = NULL;
+
+	iface = g_dbus_object_get_interface (object, "org.bluez.GattCharacteristic1");
+	if (iface == NULL) {
+		return NULL;
+	}
 
 	object_proxy = G_DBUS_OBJECT_PROXY (object);
 	return g_dbus_proxy_new_sync (g_dbus_object_proxy_get_connection (object_proxy),
@@ -464,7 +484,7 @@ static gboolean bluez_is_battery_service(GDBusProxy *proxy)
 	return g_str_equal(uuid, BATTERY_UUID);
 }
 
-static gboolean bluez_is_battery_level_characteristic(GDBusProxy *proxy)
+static gboolean bluez_characteristic_uuid_equal(GDBusProxy *proxy, const char *wanted)
 {
 	g_autoptr(GVariant) prop_variant = NULL;
 
@@ -474,16 +494,47 @@ static gboolean bluez_is_battery_level_characteristic(GDBusProxy *proxy)
 	}
 	const char *uuid = g_variant_get_string(prop_variant, NULL);
 
-	return g_str_equal(uuid, BATTERY_LEVEL_UUID);
+	return g_str_equal(uuid, wanted);
+}
+static gboolean bluez_characteristic_is_battery_level(GDBusProxy *proxy)
+{
+	return bluez_characteristic_uuid_equal(proxy, BATTERY_LEVEL_UUID);
 }
 
-static gboolean bluez_process_characteristic(GDBusObject *object)
+static gboolean bluez_characteristic_is_battery_user_desc(GDBusProxy *proxy)
+{
+	return bluez_characteristic_uuid_equal(proxy, BATTERY_USER_DESC_UUID);
+}
+
+static guint64 bluez_characteristic_read_battery_level(GDBusProxy *proxy)
+{
+	g_warning("%s",G_STRFUNC);
+	g_autoptr(GVariant) v = NULL;
+	// need to call ReadValue({}) -> array of byte
+	v = g_dbus_proxy_get_cached_property(proxy, "Value");
+	if (v == NULL) {
+		return 0;
+	}
+	const char *bytes = g_variant_get_bytestring(v);
+	if (bytes == NULL) {
+		return 0;
+	}
+
+	g_print("battery level: ");
+	for (guint8 i = 0; bytes[i] != '\0'; i++) {
+		g_print("%02x ", bytes[i]);
+	}
+	g_print("\n");
+	return 0;
+}
+
+static gboolean bluez_process_characteristic(UpBackend *backend, GDBusObject *object)
 {
 	g_autoptr(GDBusProxy) proxy = NULL;
 	g_autoptr(GVariant) prop_variant = NULL;
 	GError *error=NULL;
 
-	g_debug("%s - %s", G_STRFUNC,  g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
+	g_warning("%s - %s", G_STRFUNC,  g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
 	proxy = bluez_new_characteristic_proxy(object, &error);
 	if (!proxy) {
 		// if we could not get the `GattService1` proxy, maybe it’s because the object does not implement this
@@ -492,20 +543,36 @@ static gboolean bluez_process_characteristic(GDBusObject *object)
 		return FALSE;
 	}
 
-	prop_variant = g_dbus_proxy_get_cached_property(proxy, "Device");
+	prop_variant = g_dbus_proxy_get_cached_property(proxy, "Service");
 	if (prop_variant == NULL) {
+		g_warning("no service");
 		return FALSE;
 	}
-	const char *device = g_variant_get_string(prop_variant, NULL);
-	// do something with device
-	// check if service was seen before, and is a battery service, otherwise something is wrong
-
-	if (bluez_is_battery_level_characteristic(proxy)) {
-		// do something with object
+	const char *service_path = g_variant_get_string(prop_variant, NULL);
+	g_warning("%s - Service: %s", G_STRFUNC, service_path);
+	GDBusObject *service;
+	service = g_hash_table_lookup(backend->priv->gatt_battery_services, service_path);
+	if (service == NULL) {
+		g_warning ("could not find service for characteristic %s", g_dbus_object_get_object_path (object));
+		//return FALSE;
 	}
+	g_warning("%s - checking if characteristic is a battery level", G_STRFUNC);
+
+	if (bluez_characteristic_is_battery_level(proxy)) {
+		g_warning ("found battery level at %s!", g_dbus_object_get_object_path(object));
+		bluez_characteristic_read_battery_level(proxy);
+		return TRUE;
+	}
+
+	g_warning("%s - checking if characteristic is a user description", G_STRFUNC);
+	if (bluez_characteristic_is_battery_user_desc(proxy)) {
+		g_warning ("battery user desc");
+	}
+
+	return FALSE;
 }
 
-static gboolean bluez_process_service(GDBusObject *object)
+static gboolean bluez_process_service(UpBackend *backend, GDBusObject *object)
 {
 	g_autoptr(GDBusProxy) proxy = NULL;
 	g_autoptr(GVariant) prop_variant = NULL;
@@ -514,23 +581,39 @@ static gboolean bluez_process_service(GDBusObject *object)
 	g_debug("%s - %s", G_STRFUNC,  g_dbus_object_get_object_path (G_DBUS_OBJECT (object)));
 	proxy = bluez_new_service_proxy(object, &error);
 	if (!proxy) {
-		// if we could not get the `GattService1` proxy, maybe it’s because the object does not implement this
 		g_warning ("Failed to get proxy for %s",
 			   g_dbus_object_get_object_path (object));
 		return FALSE;
 	}
 
+	g_warning("%s - reading Device", G_STRFUNC);
 	prop_variant = g_dbus_proxy_get_cached_property(proxy, "Device");
 	if (prop_variant == NULL) {
 		return FALSE;
 	}
-	const char *device = g_variant_get_string(prop_variant, NULL);
-	// do something with device
-	// check if device was seen before, and has a battery service, otherwise something is wrong
-
-	if (bluez_is_battery_service(proxy)) {
-		// do something with object
+	const char *device_path = g_variant_get_string(prop_variant, NULL);
+	GDBusObject *device;
+	g_warning("%s - device path %s", G_STRFUNC, device_path);
+	device = g_hash_table_lookup(backend->priv->gatt_devices, device_path);
+	if (device == NULL) {
+		g_warning("found service %s before device %s, something is wrong", g_dbus_object_get_object_path(object), device_path);
+		//return FALSE;
 	}
+	g_warning("%s - before is_battery_service", G_STRFUNC);
+	// check if device was seen before, and has a battery service, otherwise something is wrong
+	if (bluez_is_battery_service(proxy)) {
+		if (device != NULL) {
+			g_warning ("adding service %s to hash table", g_dbus_object_get_object_path(object));
+			g_hash_table_insert(backend->priv->gatt_battery_services, (gpointer)g_dbus_object_get_object_path(object), g_object_ref(device));
+			return TRUE;
+		} else {
+			g_warning ("should add service %s to hash table, but corresponding device is NULL", g_dbus_object_get_object_path(object));
+		}
+	}
+	g_warning("%s - after is_battery_service", G_STRFUNC);
+
+	return FALSE;
+
 }
 
 static gboolean bluez_device_has_battery_service(GDBusProxy *proxy)
@@ -551,11 +634,11 @@ static gboolean bluez_device_has_battery_service(GDBusProxy *proxy)
 }
 
 static gboolean
-has_battery_iface (GDBusObject *object)
+has_battery_iface (UpBackend *backend, GDBusObject *object)
 {
 	GDBusInterface *iface;
 
-	gatt_debug(object);
+	//gatt_debug(object);
 	iface = g_dbus_object_get_interface (object, "org.bluez.Battery1");
 	// iface = g_dbus_object_get_interface (object, "org.bluez.Gatt1");
 	g_debug ("%s: %s - %d", G_STRFUNC, g_dbus_object_get_object_path (object), iface != NULL);
@@ -563,19 +646,27 @@ has_battery_iface (GDBusObject *object)
 	GError *error = NULL;
 	device_proxy = bluez_new_device_proxy(object, &error);
 	g_warning("%s: device_proxy: %p for %s %p", G_STRFUNC, device_proxy, g_dbus_object_get_object_path (object), error);
-	g_warning("iface name: %s", g_dbus_proxy_get_interface_name(device_proxy));
 	//dump_interfaces(object);
-	if ((device_proxy != NULL) && (bluez_device_has_battery_service(device_proxy))) {
-		g_warning("%s: device %s has battery UUID", G_STRFUNC, g_dbus_object_get_object_path (object));
-	} else {
-		g_warning("%s: device %s does not have battery UUID", G_STRFUNC, g_dbus_object_get_object_path (object));
+	if (device_proxy != NULL) {
+		if (bluez_device_has_battery_service(device_proxy)) {
+			g_warning("%s: device %s has battery UUID", G_STRFUNC, g_dbus_object_get_object_path (object));
+			g_hash_table_insert(backend->priv->gatt_devices, (gpointer)g_dbus_object_get_object_path (object), g_object_ref (object));
+		} else {
+			g_warning("%s: device %s does not have battery UUID", G_STRFUNC, g_dbus_object_get_object_path (object));
+		}
 	}
+	/*
 	if g_str_equal("/org/bluez/hci0/dev_FB_EC_57_5A_DB_B3", g_dbus_object_get_object_path (object)) {
 		g_warning("dumping uuids for device");
 		dump_uuids(object);
 	}
+	*/
 	g_autoptr(GDBusProxy) service_proxy = NULL;
 	service_proxy = bluez_new_service_proxy(object, NULL);
+	if (service_proxy != NULL) {
+		bluez_process_service (backend, object);
+	}
+	/*
 	if ((service_proxy != NULL) && bluez_is_battery_service(service_proxy)) {
 		g_warning("dumping interfaces for service %s", g_dbus_object_get_object_path (object));
 		dump_interfaces(object);
@@ -587,9 +678,14 @@ has_battery_iface (GDBusObject *object)
 		g_warning("gattservice: %p", iface);
 		gatt_debug(object);
 	}
+	*/
 
 	g_autoptr(GDBusProxy) characteristic_proxy = NULL;
 	characteristic_proxy = bluez_new_characteristic_proxy(object, NULL);
+	if (characteristic_proxy != NULL) {
+		bluez_process_characteristic(backend, object);
+	}
+	/*
 	if ((characteristic_proxy != NULL) && bluez_is_battery_level_characteristic(characteristic_proxy)) {
 		// right side: /org/bluez/hci0/dev_FB_EC_57_5A_DB_B3/service0015/char0016
 		//  left side: /org/bluez/hci0/dev_FB_EC_57_5A_DB_B3/service0010/char0011
@@ -597,6 +693,7 @@ has_battery_iface (GDBusObject *object)
 		// implements GattCharacteristic1
 		gatt_characteristic_debug(object);
 	}
+	*/
 	if (!iface)
 		return FALSE;
 	g_object_unref (iface);
@@ -639,7 +736,7 @@ bluez_interface_removed (GDBusObjectManager *manager,
 
 	g_debug("%s", G_STRFUNC);
 	/* It might be another iface on another device that got removed */
-	if (has_battery_iface (bus_object))
+	if (has_battery_iface (backend, bus_object))
 		return;
 
 	object = up_device_list_lookup (backend->priv->device_list, G_OBJECT (bus_object));
@@ -664,7 +761,7 @@ bluez_interface_added (GDBusObjectManager *manager,
 	GObject *object;
 
 	g_debug ("%s: %s", G_STRFUNC, g_dbus_object_get_object_path (bus_object));
-	if (!has_battery_iface (bus_object))
+	if (!has_battery_iface (backend, bus_object))
 		return;
 
 
@@ -1193,6 +1290,9 @@ up_backend_init (UpBackend *backend)
 	backend->priv->logind_delay_inhibitor_fd = -1;
 
 	backend->priv->logind_delay_inhibitor_fd = up_backend_inhibitor_lock_take (backend, "Pause device polling", "delay");
+
+	backend->priv->gatt_devices = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, g_object_unref);
+	backend->priv->gatt_battery_services = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, g_object_unref);
 }
 
 static void
@@ -1210,6 +1310,8 @@ up_backend_finalize (GObject *object)
 		backend->priv->bluez_watch_id = 0;
 	}
 	g_clear_object (&backend->priv->bluez_client);
+	g_clear_pointer (&backend->priv->gatt_battery_services, g_hash_table_destroy);
+	g_clear_pointer (&backend->priv->gatt_devices, g_hash_table_destroy);
 
 	g_clear_object (&backend->priv->config);
 	g_clear_object (&backend->priv->daemon);
