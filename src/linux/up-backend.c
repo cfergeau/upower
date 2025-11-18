@@ -509,19 +509,47 @@ static gboolean bluez_characteristic_is_battery_user_desc(GDBusProxy *proxy)
 static guint64 bluez_characteristic_read_battery_level(GDBusProxy *proxy)
 {
 	g_warning("%s",G_STRFUNC);
+	g_autoptr(GVariant) result = NULL;
 	g_autoptr(GVariant) v = NULL;
 	// need to call ReadValue({}) -> array of byte
-	v = g_dbus_proxy_get_cached_property(proxy, "Value");
-	if (v == NULL) {
+	//GVariantBuilder builder;
+	GVariant *empty_sv;
+
+	empty_sv = g_variant_parse(G_VARIANT_TYPE("a{sv}"), "{}", NULL, NULL, NULL);
+	if (empty_sv != NULL) {
+		g_warning("empty_sv: %s", g_variant_print(empty_sv, TRUE));
+	} else {
+		g_warning("empty_sv is NULL");
+	}
+	//g_variant_builder_init(&builder, g_variant_type_new("a{sv}"));
+	GVariant *parameters = g_variant_new_tuple(&empty_sv, 1);
+	GError *error = NULL;
+	result = g_dbus_proxy_call_sync (proxy,
+					 "ReadValue",
+					 parameters,
+					 G_DBUS_CALL_FLAGS_NONE,
+					 -1, NULL, &error);
+	//v = g_dbus_proxy_get_cached_property(proxy, "Value");
+	if (result == NULL) {
+		g_warning("failed to call ReadValue?");
+		if (error != NULL) {
+			g_warning("error: %s", error->message);
+		}
 		return 0;
 	}
-	const char *bytes = g_variant_get_bytestring(v);
+	g_warning("result: %s", g_variant_print(result, TRUE)); // (ay)
+	g_variant_get(result, "(@ay)", &v);
+
+	gsize n_elems;
+	const char *bytes = g_variant_get_fixed_array(v, &n_elems, sizeof(guint8));
+	g_warning("v: %s - %s", g_variant_print(v, TRUE), g_variant_get_type_string(v)); // (ay)
 	if (bytes == NULL) {
 		return 0;
 	}
 
+	g_warning("battery level[0]: %02x", bytes[0]);
 	g_print("battery level: ");
-	for (guint8 i = 0; bytes[i] != '\0'; i++) {
+	for (guint8 i = 0; i < n_elems; i++) {
 		g_print("%02x ", bytes[i]);
 	}
 	g_print("\n");
