@@ -1088,6 +1088,7 @@ up_daemon_device_added_cb (UpBackend *backend, GObject *device, UpDaemon *daemon
 
 		/* emit */
 		object_path = up_device_get_object_path (UP_DEVICE (device));
+		g_warning ("%s - %s", G_STRFUNC, object_path);
 		if (object_path == NULL) {
 			g_debug ("Device %s was unregistered before it was on the bus",
 				 up_exported_device_get_native_path (UP_EXPORTED_DEVICE (device)));
