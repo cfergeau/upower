@@ -66,6 +66,26 @@ up_device_list_lookup (UpDeviceList *list, GObject *native)
 	return g_object_ref (device);
 }
 
+GObject *
+up_device_list_lookup_debug (UpDeviceList *list, GObject *native)
+{
+	GObject *device;
+	const gchar *native_path;
+
+	g_return_val_if_fail (UP_IS_DEVICE_LIST (list), NULL);
+
+	/* does device exist in db? */
+	native_path = up_native_get_native_path (native);
+	g_warning ("%s - native path: %s", G_STRFUNC, native_path);
+	if (native_path == NULL)
+		return NULL;
+	device = g_hash_table_lookup (list->priv->map_native_path_to_device, native_path);
+	g_warning ("%s - device: %p", G_STRFUNC, device);
+	if (device == NULL)
+		return NULL;
+	return g_object_ref (device);
+}
+
 /**
  * up_device_list_insert:
  *
@@ -96,7 +116,7 @@ up_device_list_insert (UpDeviceList *list, gpointer device)
 	g_hash_table_insert (list->priv->map_native_path_to_device,
 			     g_strdup (native_path), g_object_ref (device));
 	g_ptr_array_add (list->priv->array, g_object_ref (device));
-	g_debug ("added %s", native_path);
+	g_warning ("added %s", native_path);
 	return TRUE;
 }
 

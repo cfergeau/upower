@@ -55,6 +55,8 @@ UpDeviceList	*up_device_list_new			(void);
 
 GObject		*up_device_list_lookup			(UpDeviceList		*list,
 							 GObject		*native);
+GObject		*up_device_list_lookup_debug		(UpDeviceList		*list,
+							 GObject		*native);
 gboolean	 up_device_list_insert			(UpDeviceList		*list,
 							 gpointer		 device);
 gboolean	 up_device_list_remove			(UpDeviceList		*list,
