@@ -116,7 +116,7 @@ up_device_list_insert (UpDeviceList *list, gpointer device)
 	g_hash_table_insert (list->priv->map_native_path_to_device,
 			     g_strdup (native_path), g_object_ref (device));
 	g_ptr_array_add (list->priv->array, g_object_ref (device));
-	g_warning ("added %s", native_path);
+	g_warning ("%s - added %s", G_STRFUNC, native_path);
 	return TRUE;
 }
 

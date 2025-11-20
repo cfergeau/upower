@@ -1078,6 +1078,7 @@ up_daemon_device_added_cb (UpBackend *backend, GObject *device, UpDaemon *daemon
 	g_return_if_fail (UP_IS_DEVICE (device) || UP_IS_DEVICE_KBD_BACKLIGHT (device));
 
 	if (UP_IS_DEVICE (device)) {
+		g_warning ("%s - inserting %s", G_STRFUNC, up_device_get_object_path (UP_DEVICE (device)));
 		/* power_supply */
 		/* add to device list */
 		up_device_list_insert (priv->power_devices, device);

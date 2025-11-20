@@ -223,8 +223,10 @@ update_removed_duplicate_device (UpBackend *backend,
 		return;
 
 	/* Re-add the old duplicate device that got hidden */
-	if (up_device_register (other_device))
+	if (up_device_register (other_device)) {
+		g_warning ("%s", G_STRFUNC);
 		g_signal_emit (backend, signals[SIGNAL_DEVICE_ADDED], 0, other_device);
+	}
 }
 
 static gboolean
@@ -731,7 +733,8 @@ bluez_proxies_changed (GDBusObjectManagerClient *manager,
 	const char *iface_name;
 
 	iface_name = g_dbus_proxy_get_interface_name (interface_proxy);
-	g_warning("%s - %s - %s", G_STRFUNC, iface_name, g_variant_print(changed_properties, FALSE));
+	g_warning("%s - %s - %s - %s", G_STRFUNC, g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)), iface_name, g_variant_print(changed_properties, FALSE));
+
 	if (!is_interesting_iface_proxy (interface_proxy))
 		return;
 
@@ -796,8 +799,11 @@ bluez_interface_added (GDBusObjectManager *manager,
 	                         "native", G_OBJECT (bus_object),
 	                         NULL);
 	if (device) {
-		if (update_added_duplicate_device (backend, device))
+		g_debug ("emitting device-added: %s", g_dbus_object_get_object_path (bus_object));
+		if (update_added_duplicate_device (backend, device)) {
+			g_warning ("%s", G_STRFUNC);
 			g_signal_emit (backend, signals[SIGNAL_DEVICE_ADDED], 0, device);
+		}
 	}
 }
 
@@ -912,8 +918,10 @@ up_device_disconnected_cb (GObject    *gobject,
 		}
 	} else {
 		g_debug ("Device %s became connected, showing device", path);
-		if (up_device_register (UP_DEVICE (gobject)))
+		if (up_device_register (UP_DEVICE (gobject))) {
+			g_warning ("%s", G_STRFUNC);
 			g_signal_emit (backend, signals[SIGNAL_DEVICE_ADDED], 0, gobject);
+		}
 	}
 }
 
@@ -924,9 +932,12 @@ udev_device_added_cb (UpBackend *backend, GObject *device)
 	g_signal_connect (device, "notify::disconnected",
 			  G_CALLBACK (up_device_disconnected_cb), backend);
 	if (UP_IS_DEVICE (device)) {
-		if (update_added_duplicate_device (backend, UP_DEVICE (device)))
+		if (update_added_duplicate_device (backend, UP_DEVICE (device))) {
+			g_warning ("%s", G_STRFUNC);
 			g_signal_emit (backend, signals[SIGNAL_DEVICE_ADDED], 0, device);
+		}
 	} else if (UP_IS_DEVICE_KBD_BACKLIGHT (device)) {
+		g_warning ("%s #2", G_STRFUNC);
 		g_signal_emit (backend, signals[SIGNAL_DEVICE_ADDED], 0, device);
 	} else {
 		g_warning ("Unknown device type");
