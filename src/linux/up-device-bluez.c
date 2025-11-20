@@ -164,6 +164,7 @@ class_to_kind (guint32 class)
 static gboolean
 coldplug_device (UpDevice *device)
 {
+	UpDeviceBluezPrivate *priv = up_device_bluez_get_instance_private (UP_DEVICE_BLUEZ (device));
 	GDBusObjectProxy *object_proxy;
 	GDBusProxy *proxy;
 	GError *error = NULL;
@@ -173,7 +174,13 @@ coldplug_device (UpDevice *device)
 	GVariant *v;
 
 	/* Static device properties */
-	object_proxy = G_DBUS_OBJECT_PROXY (up_device_get_native (device));
+	if (priv->bluez_device != NULL) {
+		/* `device` is a GATT Characteristic, `priv->bluez_device` is a bluez device */
+		object_proxy = G_DBUS_OBJECT_PROXY (priv->bluez_device);
+	} else {
+		/* `device` is a bluez device and implements and org.bluez.Device1 DBus interfaces */
+		object_proxy = G_DBUS_OBJECT_PROXY (up_device_get_native (device));
+	}
 	proxy = g_dbus_proxy_new_sync (g_dbus_object_proxy_get_connection (object_proxy),
 				       G_DBUS_PROXY_FLAGS_NONE,
 				       NULL,
@@ -265,6 +272,67 @@ coldplug_battery (UpDevice *device)
 	return TRUE;
 }
 
+static gboolean
+coldplug_gatt_battery (UpDevice *device)
+{
+	g_autoptr (GDBusObjectProxy) object_proxy;
+	GDBusProxy *proxy;
+	GError *error = NULL;
+	g_autoptr (GVariant) result = NULL;
+	g_autoptr (GVariant) v = NULL;
+	GVariant *empty_sv;
+	GVariant *parameters;
+	gsize n_elems;
+	const char *bytes;
+
+	object_proxy = G_DBUS_OBJECT_PROXY (up_device_get_native (device));
+	proxy = g_dbus_proxy_new_sync (g_dbus_object_proxy_get_connection (object_proxy),
+				       G_DBUS_PROXY_FLAGS_NONE,
+				       NULL,
+				       "org.bluez",
+				       g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)),
+				       "org.bluez.Characteristic1",
+				       NULL,
+				       &error);
+
+	if (!proxy) {
+		g_warning ("Failed to get proxy for %s",
+			   g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)));
+		return FALSE;
+	}
+
+
+	empty_sv = g_variant_parse (G_VARIANT_TYPE ("a{sv}"), "{}", NULL, NULL, NULL);
+	parameters = g_variant_new_tuple (&empty_sv, 1);
+	result = g_dbus_proxy_call_sync (proxy,
+					 "ReadValue",
+					 parameters,
+					 G_DBUS_CALL_FLAGS_NONE,
+					 -1, NULL, &error);
+	if (error != NULL) {
+		g_debug ("failed to call ReadValue: %s", error->message);
+		return FALSE;
+	}
+
+	g_variant_get (result, "(@ay)", &v);
+	bytes = g_variant_get_fixed_array (v, &n_elems, sizeof(guint8));
+	if (bytes == NULL) {
+		return FALSE;
+	}
+
+	if ((n_elems < 1) || (n_elems > 1)) {
+		g_debug ("battery level should be a 8 bit value");
+		return FALSE;
+	}
+
+	g_object_set (device,
+		      "is-present", TRUE,
+		      "percentage", (gdouble) bytes[0],
+		      "update-time", (guint64) g_get_real_time () / G_USEC_PER_SEC,
+		      NULL);
+
+	return TRUE;
+}
 
 /**
  * up_device_bluez_coldplug:
@@ -274,13 +342,21 @@ coldplug_battery (UpDevice *device)
 static gboolean
 up_device_bluez_coldplug (UpDevice *device)
 {
+	UpDeviceBluezPrivate *priv = up_device_bluez_get_instance_private (UP_DEVICE_BLUEZ (device));
+
 	/* Static device properties */
 	if (!coldplug_device (device)) {
 		return FALSE;
 	}
 
 	/* Initial battery values */
-	return coldplug_battery (device);
+	if (priv->bluez_device != NULL) {
+		/* `device` is a GATT Characteristic */
+		return coldplug_gatt_battery (device);
+	} else {
+		/* `device` is a bluez device and implements the org.bluez.Battery1 and org.bluez.Device1 DBus interfaces */
+		return coldplug_battery (device);
+	}
 }
 
 static void
