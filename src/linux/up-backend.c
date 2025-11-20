@@ -647,7 +647,7 @@ has_battery_iface (UpBackend *backend, GDBusObject *object)
 	GDBusInterface *iface;
 
 	//gatt_debug(object);
-	iface = g_dbus_object_get_interface (object, "org.bluez.Gatt1");
+	iface = g_dbus_object_get_interface (object, "org.bluez.Battery1");
 	g_debug ("%s: %s - %d", G_STRFUNC, g_dbus_object_get_object_path (object), iface != NULL);
 	g_autoptr(GDBusProxy) device_proxy = NULL;
 	GError *error = NULL;
