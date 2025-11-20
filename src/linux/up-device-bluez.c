@@ -25,7 +25,19 @@
 #include "up-types.h"
 #include "up-device-bluez.h"
 
-G_DEFINE_TYPE (UpDeviceBluez, up_device_bluez, UP_TYPE_DEVICE)
+typedef struct {
+} UpDeviceBluezPrivate;
+
+G_DEFINE_TYPE_WITH_CODE (UpDeviceBluez, up_device_bluez, UP_TYPE_DEVICE, G_ADD_PRIVATE (UpDeviceBluez))
+//UpDeviceBluezPrivate *priv = up_device_bluez_get_instance_private (device);
+
+enum {
+  PROP_0,
+  PROP_BLUEZ_DEVICE,
+  N_PROPS
+};
+
+static GParamSpec *properties[N_PROPS];
 
 static UpDeviceKind
 appearance_to_kind (guint16 appearance)
@@ -311,4 +323,11 @@ up_device_bluez_class_init (UpDeviceBluezClass *klass)
 	UpDeviceClass *device_class = UP_DEVICE_CLASS (klass);
 
 	device_class->coldplug = up_device_bluez_coldplug;
+
+	properties[PROP_BLUEZ_DEVICE] =
+		g_param_spec_object ("bluez-device",
+		                     "Device",
+		                     "BlueZ Device",
+		                     G_TYPE_OBJECT,
+		                     G_PARAM_STATIC_STRINGS | G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY);
 }
