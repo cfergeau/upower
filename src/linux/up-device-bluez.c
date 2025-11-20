@@ -26,6 +26,7 @@
 #include "up-device-bluez.h"
 
 typedef struct {
+	GObject *bluez_device;
 } UpDeviceBluezPrivate;
 
 G_DEFINE_TYPE_WITH_CODE (UpDeviceBluez, up_device_bluez, UP_TYPE_DEVICE, G_ADD_PRIVATE (UpDeviceBluez))
@@ -317,10 +318,70 @@ up_device_bluez_update (UpDeviceBluez *bluez,
 	}
 }
 
+
+static void
+up_device_bluez_finalize (GObject *object)
+{
+	UpDeviceBluezPrivate *priv = up_device_bluez_get_instance_private (UP_DEVICE_BLUEZ (object));
+
+	g_clear_object (&priv->bluez_device);
+
+	G_OBJECT_CLASS (up_device_bluez_parent_class)->finalize (object);
+}
+
+static void
+up_device_bluez_dispose (GObject *object)
+{
+	UpDeviceBluezPrivate *priv = up_device_bluez_get_instance_private (UP_DEVICE_BLUEZ (object));
+
+	g_clear_object (&priv->bluez_device);
+
+	G_OBJECT_CLASS (up_device_bluez_parent_class)->dispose (object);
+}
+
+/*
+ * up_device_bluez_set_property:
+ */
+static void
+up_device_bluez_set_property (GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
+{
+	UpDeviceBluez *device = UP_DEVICE_BLUEZ (object);
+	UpDeviceBluezPrivate *priv = up_device_bluez_get_instance_private (device);
+
+	switch (prop_id) {
+	case PROP_BLUEZ_DEVICE:
+		priv->bluez_device = g_value_dup_object (value);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+		break;
+	}
+}
+
+/*
+ * up_device_bluez_get_property:
+ */
+static void
+up_device_bluez_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+{
+	switch (prop_id) {
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+		break;
+	}
+}
+
 static void
 up_device_bluez_class_init (UpDeviceBluezClass *klass)
 {
+	GObjectClass *object_class = G_OBJECT_CLASS (klass);
 	UpDeviceClass *device_class = UP_DEVICE_CLASS (klass);
+
+	object_class->finalize = up_device_bluez_finalize;
+	object_class->dispose = up_device_bluez_dispose;
+
+	object_class->set_property = up_device_bluez_set_property;
+	object_class->get_property = up_device_bluez_get_property;
 
 	device_class->coldplug = up_device_bluez_coldplug;
 
