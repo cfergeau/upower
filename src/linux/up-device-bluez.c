@@ -148,13 +148,8 @@ class_to_kind (guint32 class)
 	return UP_DEVICE_KIND_BLUETOOTH_GENERIC;
 }
 
-/**
- * up_device_bluez_coldplug:
- *
- * Return %TRUE on success, %FALSE if we failed to get data and should be removed
- **/
 static gboolean
-up_device_bluez_coldplug (UpDevice *device)
+coldplug_device (UpDevice *device)
 {
 	GDBusObjectProxy *object_proxy;
 	GDBusProxy *proxy;
@@ -163,7 +158,6 @@ up_device_bluez_coldplug (UpDevice *device)
 	const char *uuid;
 	const char *model;
 	GVariant *v;
-	guchar percentage;
 
 	/* Static device properties */
 	object_proxy = G_DBUS_OBJECT_PROXY (up_device_get_native (device));
@@ -218,7 +212,18 @@ up_device_bluez_coldplug (UpDevice *device)
 
 	g_object_unref (proxy);
 
-	/* Initial battery values */
+	return TRUE;
+}
+
+static gboolean
+coldplug_battery (UpDevice *device)
+{
+	GDBusObjectProxy *object_proxy;
+	GDBusProxy *proxy;
+	GError *error = NULL;
+	guchar percentage;
+
+	object_proxy = G_DBUS_OBJECT_PROXY (up_device_get_native (device));
 	proxy = g_dbus_proxy_new_sync (g_dbus_object_proxy_get_connection (object_proxy),
 				       G_DBUS_PROXY_FLAGS_NONE,
 				       NULL,
@@ -245,6 +250,24 @@ up_device_bluez_coldplug (UpDevice *device)
 	g_object_unref (proxy);
 
 	return TRUE;
+}
+
+
+/**
+ * up_device_bluez_coldplug:
+ *
+ * Return %TRUE on success, %FALSE if we failed to get data and should be removed
+ **/
+static gboolean
+up_device_bluez_coldplug (UpDevice *device)
+{
+	/* Static device properties */
+	if (!coldplug_device (device)) {
+		return FALSE;
+	}
+
+	/* Initial battery values */
+	return coldplug_battery (device);
 }
 
 static void
