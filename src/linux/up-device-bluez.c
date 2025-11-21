@@ -162,6 +162,38 @@ class_to_kind (guint32 class)
 }
 
 static gboolean
+up_device_bluez_is_characteristic (UpDevice *device)
+{
+	UpDeviceBluezPrivate *priv = up_device_bluez_get_instance_private (UP_DEVICE_BLUEZ (device));
+	return (priv->bluez_device != NULL); 
+}
+
+static int
+characteristic_get_handle (GDBusObjectProxy *object_proxy)
+{
+	g_autoptr(GDBusProxy) proxy = NULL;
+	g_autoptr(GVariant) v = NULL;
+	GError *error = NULL;
+
+	proxy = g_dbus_proxy_new_sync (g_dbus_object_proxy_get_connection (object_proxy),
+				       G_DBUS_PROXY_FLAGS_NONE,
+				       NULL,
+				       "org.bluez",
+				       g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)),
+				       "org.bluez.Characteristic1",
+				       NULL,
+				       &error);
+
+	if (!proxy) {
+		g_warning ("Failed to get proxy for %s (iface org.bluez.GattCharacteristic1)",
+			   g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)));
+		return 0;
+	}
+	v = g_dbus_proxy_get_cached_property (proxy, "Handle");
+	return g_variant_get_uint16 (v);
+}
+
+static gboolean
 coldplug_device (UpDevice *device)
 {
 	UpDeviceBluezPrivate *priv = up_device_bluez_get_instance_private (UP_DEVICE_BLUEZ (device));
@@ -169,12 +201,12 @@ coldplug_device (UpDevice *device)
 	GDBusProxy *proxy;
 	GError *error = NULL;
 	UpDeviceKind kind;
-	const char *uuid;
+	g_autofree gchar *uuid = NULL;
 	const char *model;
 	GVariant *v;
 
 	/* Static device properties */
-	if (priv->bluez_device != NULL) {
+	if (up_device_bluez_is_characteristic (device)) {
 		/* `device` is a GATT Characteristic, `priv->bluez_device` is a bluez device */
 		object_proxy = G_DBUS_OBJECT_PROXY (priv->bluez_device);
 	} else {
@@ -213,9 +245,22 @@ coldplug_device (UpDevice *device)
 		kind = UP_DEVICE_KIND_BLUETOOTH_GENERIC;
 	}
 
-	v = g_dbus_proxy_get_cached_property (proxy, "Address");
-	uuid = g_variant_get_string (v, NULL);
-	g_variant_unref (v);
+	if (!up_device_bluez_is_characteristic (device)) {
+		v = g_dbus_proxy_get_cached_property (proxy, "Address");
+		uuid = g_variant_dup_string (v, NULL);
+		g_variant_unref (v);
+	} else {
+		GDBusObjectProxy *object_proxy;
+		int handle;
+		object_proxy = G_DBUS_OBJECT_PROXY (up_device_get_native (device));
+		handle = characteristic_get_handle (object_proxy);
+
+		v = g_dbus_proxy_get_cached_property (proxy, "Address");
+		uuid = g_strdup_printf ("%s#%d", g_variant_get_string (v, NULL), handle);
+		g_variant_unref (v);
+	}
+	g_warning ("%s - uuid: %s", G_STRFUNC, uuid);
+	
 
 	v = g_dbus_proxy_get_cached_property (proxy, "Alias");
 	model = g_variant_get_string (v, NULL);
@@ -291,7 +336,7 @@ coldplug_gatt_battery (UpDevice *device)
 				       NULL,
 				       "org.bluez",
 				       g_dbus_object_get_object_path (G_DBUS_OBJECT (object_proxy)),
-				       "org.bluez.Characteristic1",
+				       "org.bluez.GattCharacteristic1",
 				       NULL,
 				       &error);
 

@@ -77,6 +77,8 @@ struct UpBackendPrivate
 	GHashTable		*gatt_devices;
 	// service path -> device GDBusObject
 	GHashTable		*gatt_battery_services;
+	// characteristics path -> device GDBusObject
+	GHashTable		*gatt_battery_characteristics;
 };
 
 enum {
@@ -562,6 +564,7 @@ static gboolean bluez_process_characteristic(UpBackend *backend, GDBusObject *ob
 			g_warning ("could not find service for characteristic %s", g_dbus_object_get_object_path (object));
 			return FALSE;
 		}
+		g_hash_table_insert(backend->priv->gatt_battery_characteristics,  (gpointer)g_dbus_object_get_object_path(object), g_object_ref(device));
 		UpDevice *up_device;
 		up_device = UP_DEVICE (up_device_list_lookup_debug (backend->priv->device_list, G_OBJECT (device)));
 		g_warning ("found device %s (%p)", g_dbus_object_get_object_path (device), up_device);
@@ -641,6 +644,15 @@ static gboolean bluez_device_has_battery_service(GDBusProxy *proxy)
 	}
 
 	return FALSE;
+}
+
+static gboolean
+has_gatt_characteristic_iface (GDBusObject *object)
+{
+	g_autoptr(GDBusInterface) iface = NULL;
+
+	iface = g_dbus_object_get_interface (object, "org.bluez.GattCharacteristic1");
+	return (iface != NULL);
 }
 
 static gboolean
@@ -761,7 +773,6 @@ bluez_interface_removed (GDBusObjectManager *manager,
 	/* It might be another iface on another device that got removed */
 	if (has_battery_iface (backend, bus_object))
 		return;
-
 	object = up_device_list_lookup (backend->priv->device_list, G_OBJECT (bus_object));
 	if (!object)
 		return;
@@ -782,10 +793,16 @@ bluez_interface_added (GDBusObjectManager *manager,
 	g_autoptr(UpDevice) device = NULL;
 	UpBackend *backend = user_data;
 	GObject *object;
+	GObject *bluez_device = NULL;
 
 	g_debug ("%s: %s", G_STRFUNC, g_dbus_object_get_object_path (bus_object));
 	if (!has_battery_iface (backend, bus_object))
 		return;
+
+	if (has_gatt_characteristic_iface (bus_object)) {
+		bluez_device = g_hash_table_lookup (backend->priv->gatt_battery_characteristics,  (gpointer)g_dbus_object_get_object_path(bus_object));
+		g_warning ("%s - bluez_device %p", G_STRFUNC, bluez_device);
+	}
 
 
 	object = up_device_list_lookup (backend->priv->device_list, G_OBJECT (bus_object));
@@ -794,10 +811,20 @@ bluez_interface_added (GDBusObjectManager *manager,
 		return;
 	}
 
-	device = g_initable_new (UP_TYPE_DEVICE_BLUEZ, NULL, NULL,
-	                         "daemon", backend->priv->daemon,
-	                         "native", G_OBJECT (bus_object),
-	                         NULL);
+	if (bluez_device != NULL) {
+		// gatt characteristic with battery level UUID
+		device = g_initable_new (UP_TYPE_DEVICE_BLUEZ, NULL, NULL,
+					 "daemon", backend->priv->daemon,
+					 "native", G_OBJECT (bus_object),
+					 "bluez-device", bluez_device,
+					 NULL);
+	} else {
+		// bluez device with org.bluez.Battery1 interface
+		device = g_initable_new (UP_TYPE_DEVICE_BLUEZ, NULL, NULL,
+					 "daemon", backend->priv->daemon,
+					 "native", G_OBJECT (bus_object),
+					 NULL);
+	}
 	if (device) {
 		g_debug ("emitting device-added: %s", g_dbus_object_get_object_path (bus_object));
 		if (update_added_duplicate_device (backend, device)) {
@@ -1323,6 +1350,7 @@ up_backend_init (UpBackend *backend)
 
 	backend->priv->gatt_devices = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, g_object_unref);
 	backend->priv->gatt_battery_services = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, g_object_unref);
+	backend->priv->gatt_battery_characteristics = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, g_object_unref);
 }
 
 static void
@@ -1340,6 +1368,7 @@ up_backend_finalize (GObject *object)
 		backend->priv->bluez_watch_id = 0;
 	}
 	g_clear_object (&backend->priv->bluez_client);
+	g_clear_pointer (&backend->priv->gatt_battery_characteristics, g_hash_table_destroy);
 	g_clear_pointer (&backend->priv->gatt_battery_services, g_hash_table_destroy);
 	g_clear_pointer (&backend->priv->gatt_devices, g_hash_table_destroy);
 
